@@ -1,25 +1,34 @@
 -- Useful reusable functions
 
-local tonumber = tonumber
-local awful = awful
-local naughty = naughty
-local timer = timer
-local pairs = pairs
-local type = type
-local table = table
-local io = io
-local tostring = tostring
-local log = log
+local awful = require('awful')
+local naughty = require('naughty')
 
-module("utility")
+-- Module "utility"
+local utility = {}
 
-function run_once(prg, times)
+function utility.slurp(file, mode)
+   local handler = io.open(file, 'r')
+   local result = handler:read(mode or "*all")
+   handler:close()
+   return result
+end
+
+function utility.pslurp(command, mode)
+   local handler = io.popen(command)
+   local result = handler:read(mode or "*all")
+   handler:close()
+   return result
+end
+
+local userdir = userdir or utility.pslurp("echo $HOME", "*line")
+
+function utility.run_once(prg, times)
    if not prg then
       do return nil end
    end
    times = times or 1
-   count_prog = 
-      tonumber(awful.util.pread('ps aux | grep "' .. prg .. '" | grep -v grep | wc -l'))
+   count_prog =
+      tonumber(awful.util.pread('ps aux | grep "' .. string.gsub(prg, ":", " ") .. '" | grep -v grep | wc -l')) or 0
    if times > count_prog then
       for l = count_prog, times-1 do
          awful.util.spawn_with_shell(prg)
@@ -27,14 +36,21 @@ function run_once(prg, times)
    end
 end
 
-function repeat_every(func, seconds)
-   func()
-   local t = timer({ timeout = seconds })
-   t:connect_signal("timeout", func)
-   t:start()
+local function subs_home(command)
+   return string.gsub(command, "~", userdir)
 end
 
-function pop_spaces(s1,s2,maxsize)
+function utility.autorun(apps, run_once_apps)
+   for _, app in ipairs(apps or {}) do
+      print(app)
+      awful.util.spawn_with_shell(subs_home(app), true)
+   end
+   for _, app in ipairs(run_once_apps or {}) do
+      utility.run_once(subs_home(app), 1)
+   end
+end
+
+function utility.pop_spaces(s1,s2,maxsize)
    local sps = ""
    for i = 1, maxsize-string.len(s1)-string.len(s2) do
       sps = sps .. " "
@@ -42,7 +58,7 @@ function pop_spaces(s1,s2,maxsize)
    return s1 .. sps .. s2
 end
 
-function append_table(what, to_what, overwrite)
+function utility.append_table(what, to_what, overwrite)
    for k, v in pairs(what) do
       if type(k) ~= "number" then
          if overwrite or not to_what[k] then
@@ -54,31 +70,60 @@ function append_table(what, to_what, overwrite)
    end
 end
 
-function slurp(file, mode)
-   local mode = mode or "*all"
-   local handler = io.open(file, 'r')
-   local result = handler:read(mode)
-   handler:close()
-   return result
-end
-
 -- *** Internal calc function *** ---
-function calc(result)
+function utility.calc(result)
    naughty.notify( { title = "Awesome calc",
                      text = "Result: " .. result,
                      timeout = 5})
 end
 
--- *** Debug pring function *** ---
-function nprint(s)
-   naughty.notify( { title = "Debug print",
-                     text = tostring(s),
-                     timeout = 5})
+function utility.view_non_empty(step, s)
+   local s = mouse.screen or 1
+   -- The following makes sure we don't go into an endless loop
+   -- if no clients are visible. I guess that case could be handled better,
+   -- but meh
+   local num_tags = #awful.tag.gettags(s)
+   for i = 1, num_tags do
+     awful.tag.viewidx(step, s)
+     if #awful.client.visible(s) > 0 then
+        return
+     end
+  end
 end
 
--- *** Expand table debug pring function *** ---
-function dprint(s)
-   naughty.notify( { title = "ETDP",
-                     text = log.d_return("Debug output", s),
-                     timeout = 0})
+function utility.view_first_empty(s)
+   local s = mouse.screen or 1
+   -- The following makes sure we don't go into an endless loop
+   -- if no clients are visible. I guess that case could be handled better,
+   -- but meh
+   local num_tags = #awful.tag.gettags(s)
+   for i = 1, num_tags do
+      awful.tag.viewidx(1, s)
+      if #awful.client.visible(s) == 0 then
+         return
+      end
+   end
 end
+
+function utility.spawn_in_terminal(program)
+   awful.util.spawn(software.terminal_cmd .. program)
+end
+
+function utility.add_hover_tooltip(w, f)
+   w:connect_signal("mouse::enter",
+                    function(c)
+                       local nt = f(w)
+                       nt.screen = mouse.screen
+                       nt.position = "bottom_right"
+                       w.hover_notification = naughty.notify(nt)
+                    end)
+   w:connect_signal("mouse::leave",
+                    function(c)
+                       if w.hover_notification ~= nil then
+                          naughty.destroy(w.hover_notification)
+                          w.hover_notification = nil
+                       end
+                    end)
+end
+
+return utility
